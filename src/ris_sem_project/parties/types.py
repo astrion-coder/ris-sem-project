@@ -66,11 +66,16 @@ class PublicParams:
 
 @dataclass(slots=True, kw_only=True)
 class UserRecord:
-    """What S_i stores per user after Register step 3: (ID_u, pk_u, mu_u)."""
+    """What S_i stores per user after Register step 3: (ID_u, pk_u, sigma, mu_u)."""
 
     user_id: UserID
     user_pk: bytes | None = None
     """pk_u (Dilithium); None until Register step 2 completes."""
+    hint: bytes | None = None
+    """The extractor hint sigma = S(F_reg), packed ell * n bits, stored in Register step 3.
+
+    Plan decision 4's deviation from Fig. 2, which has no stored hint. None until step 3.
+    """
     fail_count: int = 0
     """mu_u: login attempts counted in the current epoch."""
 
@@ -108,9 +113,15 @@ class TOPRFResponse:
     evaluation: bytes
     """S_i's partial evaluation under its key share k_i."""
     server_pk: bytes
-    """pk_i = floor(a * k_i)_p, used by U to unblind."""
+    """pk_i = a k_i + 2e_i, unrounded (plan decision 4), used by U to unblind."""
     user_pk: bytes | None = None
     """pk_u, returned by S_i in Login step L1 (None during Register)."""
+    hint: bytes | None = None
+    """sigma = S(F_reg), returned with pk_u in Login step L1 (None during Register).
+
+    Plan decision 4's deviation from Fig. 2: U extracts K_u = E(F_login, sigma) with the hint
+    computed at Register, so the same password gives the same K_u at every Login.
+    """
 
 
 # --------------------------------------------------------------------------
@@ -120,10 +131,15 @@ class TOPRFResponse:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class RegisterKeyMessage:
-    """U -> S_i, Register step 2: pk_u from (pk_u, sk_u) <- Gen(1^kappa, K_u)."""
+    """U -> S_i, Register step 2: pk_u from (pk_u, sk_u) <- Gen(1^kappa, K_u), and the hint sigma."""
 
     user_id: UserID
     user_pk: bytes
+    hint: bytes
+    """sigma = S(F_reg), packed ell * n bits, computed by U in Register step 1.
+
+    Plan decision 4's deviation from Fig. 2: S_i stores it and returns it at every Login.
+    """
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
