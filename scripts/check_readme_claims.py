@@ -5,7 +5,8 @@ Usage: .venv/bin/python scripts/check_readme_claims.py
 Table shape:  | Claim | Value | Notebook | Cell |
 Cell k is the k-th code cell, i.e. execution count [k] after a fresh Run All.
 
-An exact Value (backticks stripped) must appear verbatim in that cell's saved output.
+An exact Value (backticks stripped) must appear verbatim in that cell's saved output, not as
+part of a longer word or number (`p = 2` does not match `p = 28`).
 A Value written `[label]~<number> [unit]` is a measurement that changes between runs (a
 timing, an observed noise maximum): it passes when the output contains the label, then a
 number within a factor of 2 of the stated one, then the unit. Give a label when the cell
@@ -54,6 +55,12 @@ def cell_output(notebook: Path, k: int) -> str:
     return "".join(parts)
 
 
+def exact_found(value: str, output: str) -> bool:
+    before = r"(?<![0-9A-Za-z_])" if value[:1].isalnum() else ""
+    after = r"(?![0-9A-Za-z_])" if value[-1:].isalnum() else ""
+    return re.search(before + re.escape(value) + after, output) is not None
+
+
 def approx_found(value: str, output: str) -> bool:
     match = re.fullmatch(rf"(.*?)~\s*({NUMBER})\s*(\S.*)?", value)
     if match is None:
@@ -74,7 +81,7 @@ def main() -> int:
     for claim, value, notebook, cell in rows:
         value = value.strip("`")
         output = cell_output(ROOT / notebook, int(cell))
-        ok = approx_found(value, output) if "~" in value else value in output
+        ok = approx_found(value, output) if "~" in value else exact_found(value, output)
         failures += not ok
         print(f"{'ok  ' if ok else 'FAIL'} {notebook} [{cell}] {value!r}  {claim}")
     print(f"{len(rows) - failures}/{len(rows)} claims found in their cells")
