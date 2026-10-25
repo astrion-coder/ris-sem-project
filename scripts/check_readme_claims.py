@@ -6,9 +6,10 @@ Table shape:  | Claim | Value | Notebook | Cell |
 Cell k is the k-th code cell, i.e. execution count [k] after a fresh Run All.
 
 An exact Value (backticks stripped) must appear verbatim in that cell's saved output.
-A Value written `~<number> <unit>` is a measurement that changes between runs (a timing,
-an observed noise maximum): it passes when the output contains a number followed by the
-same unit that is within a factor of 2 of the stated number.
+A Value written `[label]~<number> [unit]` is a measurement that changes between runs (a
+timing, an observed noise maximum): it passes when the output contains the label, then a
+number within a factor of 2 of the stated one, then the unit. Give a label when the cell
+prints other numbers that could match on their own, e.g. `max |2e''| = ~5000`.
 Run scripts/run_notebooks.py first so outputs are current.
 """
 
@@ -33,7 +34,7 @@ def claim_rows(readme: str) -> list[list[str]]:
             break
         if not line.startswith("|"):
             continue
-        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        cells = [c.strip().replace("\\|", "|") for c in re.split(r"(?<!\\)\|", line.strip().strip("|"))]
         if cells[0] == "Claim" or set("".join(cells)) <= set("-: "):
             continue
         rows.append(cells)
@@ -54,12 +55,13 @@ def cell_output(notebook: Path, k: int) -> str:
 
 
 def approx_found(value: str, output: str) -> bool:
-    match = re.fullmatch(rf"~\s*({NUMBER})\s*(\S.*)?", value)
+    match = re.fullmatch(rf"(.*?)~\s*({NUMBER})\s*(\S.*)?", value)
     if match is None:
         raise ValueError(f"malformed approximate value {value!r}")
-    stated = float(match.group(1).replace(",", ""))
-    unit = re.escape(match.group(2) or "")
-    for found in re.finditer(rf"({NUMBER})\s*{unit}(?![A-Za-z])", output):
+    label = re.escape(match.group(1))
+    stated = float(match.group(2).replace(",", ""))
+    unit = re.escape(match.group(3) or "")
+    for found in re.finditer(rf"{label}({NUMBER})\s*{unit}(?![A-Za-z])", output):
         measured = float(found.group(1).replace(",", ""))
         if stated == measured == 0 or (stated * measured > 0 and max(stated, measured) / min(stated, measured) <= TOLERANCE):
             return True
@@ -72,7 +74,7 @@ def main() -> int:
     for claim, value, notebook, cell in rows:
         value = value.strip("`")
         output = cell_output(ROOT / notebook, int(cell))
-        ok = approx_found(value, output) if value.startswith("~") else value in output
+        ok = approx_found(value, output) if "~" in value else value in output
         failures += not ok
         print(f"{'ok  ' if ok else 'FAIL'} {notebook} [{cell}] {value!r}  {claim}")
     print(f"{len(rows) - failures}/{len(rows)} claims found in their cells")
