@@ -103,8 +103,8 @@ class Server(Party):
 
     @abstractmethod
     def key_update_apply(self, shares: Sequence[KeyUpdateShare]) -> None:
-        """Steps 4-5: verify the received shares, set k_i' = k_i + sum_j lambda_ij [F]_j^i,
-        recompute pk_i', reset every mu_u and advance the epoch.
+        """Steps 4-5: verify the received shares, set k_i' = k_i + sum_j [F]_j(i) (plan decision 6
+        drops the printed lambda_ij), recompute pk_i', reset every mu_u and advance the epoch.
 
         The master key K is unchanged (Lemma 3), so users are unaffected.
         """

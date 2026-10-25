@@ -4,20 +4,29 @@ S_i holds its DKG key share k_i and pk_i = a k_i + 2e_i, one UserRecord per regi
 and at most M = capacity outsourced (Ct, C, i) per user. Outsource and Retrieve are authorized
 by sig_Ct and sig_dsk under pk_u, as the paper prints them: Retrieve reaches all N servers,
 while Login reaches only t.
+
+Server key update (Sec. IV-F, plan decision 6): every S_j deals F_ji = [F]_j(i) for a fresh
+zero-constant polynomial [F]_j of degree t - 1, committing to its coefficients with the linear
+hash H. S_i checks each share, adds sum_j F_ji to k_i, and K = sum_i lambda_i k_i is unchanged.
 """
 
 import hmac
 import os
 from collections.abc import Sequence
 from dataclasses import dataclass
+from enum import Enum, auto
+
+import numpy as np
 
 from ..index import ItemScan, ScanOutcome, scan_item
 from ..params import Lattice
-from ..primitives import toprf
+from ..primitives import symmetric, toprf
 from ..primitives.encoding import int_bytes, pack
-from ..primitives.ring import Poly
+from ..primitives.linear_hash import linear_hash
+from ..primitives.ring import Poly, Ring
+from ..primitives.sampling import uniform
 from ..primitives.secret_sharing import genkey, genshare
-from ..primitives.signature import verify
+from ..primitives.signature import SEED_SIZE, keypair_from_seed, sign, verify
 from .server import Server
 from .types import (
     DKGShare,
@@ -49,6 +58,51 @@ class ServerKey:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class PeerLink:
+    """What S_i holds about a server S_j (S_i itself included) for key update.
+
+    E(i, .) of step 3 stands in for the secure server-to-server channel that Sec. III-A assumes:
+    AES-256-GCM under channel_key, a 32-byte key shared by the two ends. It is not a scheme
+    contribution. protocol.setup_servers generates the keys and hands them out.
+    """
+
+    verification_key: bytes
+    """pk_j of S_j's ML-DSA-44 signing key, which signs S_j's key update shares."""
+    channel_key: bytes
+
+
+class ShareOutcome(Enum):
+    """Where step 4's check of one received key update share stopped."""
+
+    MALFORMED = auto()
+    """Not addressed to this server, from an unknown sender, an epoch outside [0, 2^32), the wrong number
+    of commitments, or a commitment or share that is not n coefficients below q."""
+    BAD_SIGNATURE = auto()
+    """Ver(pk_j, (j, omega, h, E(i, F_ji)), sig_j) failed."""
+    WRONG_EPOCH = auto()
+    """The signature verified, but omega is not this server's current epoch (a replay)."""
+    DECRYPT_FAILED = auto()
+    """The ciphertext E(i, F_ji) does not decrypt under the channel key."""
+    COMMITMENT_MISMATCH = auto()
+    """F_ji decrypted, but H(F_ji) != sum_k i^k h_k."""
+    ACCEPTED = auto()
+    """Every check passed."""
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ShareCheck:
+    """Step 4 for the share S_j sent to S_i. A field is None exactly when the step that produces it did not run."""
+
+    sender: ServerID
+    receiver: ServerID
+    outcome: ShareOutcome
+    recomputed: bytes | None = None
+    """H(F_ji), computed from the decrypted share."""
+    committed: bytes | None = None
+    """sum_{k=1}^{t-1} i^k h_k, computed from the commitments."""
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class RetrieveScan:
     """R2 at one S_i: the check of every item it stores for the user, and the list L_i it returns."""
 
@@ -72,6 +126,18 @@ class QPASEServer(Server):
         self.key: ServerKey | None = None
         """None until the DKG has run."""
         self._sessions: dict[UserID, SessionID] = {}
+        self.verification_key, self._signing_key = keypair_from_seed(os.urandom(SEED_SIZE))
+        """(pk_i, sk_i) of this server's ML-DSA-44 key pair, which signs its key update shares."""
+        self.peers: dict[ServerID, PeerLink] = {}
+        """The link to each server S_j, S_i itself included, that key update can use."""
+
+    def add_peer(self, peer_id: ServerID, link: PeerLink) -> None:
+        """Record, or replace, the link to server S_j."""
+        if not 1 <= peer_id <= self.pp.N:
+            raise ValueError(f"peer id must be in [1, {self.pp.N}], got {peer_id}")
+        if len(link.channel_key) != symmetric.KEY_SIZE:
+            raise ValueError(f"channel key must be {symmetric.KEY_SIZE} bytes, got {len(link.channel_key)}")
+        self.peers[peer_id] = link
 
     def dkg_genshare(self) -> dict[ServerID, DKGShare]:
         """Genshare: [s_i]_j = f_i(j) for every S_j, this server included."""
@@ -203,10 +269,89 @@ class QPASEServer(Server):
         return self.retrieve_scan(request).response
 
     def key_update_shares(self) -> dict[ServerID, KeyUpdateShare]:
-        raise NotImplementedError("server key update (Sec. IV-F) is unit U5")
+        """Steps 1-3: sample [F]_j(X) = sum_{k=1}^{t-1} alpha_k X^k with alpha_k <- R_q, then for every S_i
+        (this server included) send F_ji = [F]_j(i) as E(i, F_ji) with h = {H(alpha_k)} and sig_j.
+        """
+        ring = self._lattice.ring
+        alphas = [uniform(ring, (ring.n,)) for _ in range(self.pp.t - 1)]
+        commitments = tuple(ring.to_bytes(linear_hash(ring, alpha)) for alpha in alphas)
+        shares = {}
+        for i in range(1, self.pp.N + 1):
+            link = self.peers.get(i)
+            if link is None:
+                raise ProtocolAbort(f"S_{self.server_id} is not linked to S_{i}")
+            encrypted = symmetric.encrypt(link.channel_key, ring.to_bytes(_zero_constant_eval(ring, alphas, i)))
+            signed = _signed_bytes(self.server_id, self.epoch, commitments, encrypted)
+            shares[i] = KeyUpdateShare(
+                sender=self.server_id,
+                receiver=i,
+                epoch=self.epoch,
+                commitments=commitments,
+                encrypted_share=encrypted,
+                signature=sign(self._signing_key, signed),
+            )
+        return shares
+
+    def key_update_check(self, shares: Sequence[KeyUpdateShare]) -> tuple[ShareCheck, ...]:
+        """Step 4's verdict on each share in turn, without changing any state."""
+        return tuple(self._open_share(share)[0] for share in shares)
 
     def key_update_apply(self, shares: Sequence[KeyUpdateShare]) -> None:
-        raise NotImplementedError("server key update (Sec. IV-F) is unit U5")
+        """Steps 4-5: one share from each of the N servers, each checked by key_update_check, then
+        k_i' = k_i + sum_j F_ji, pk_i' = a k_i' + 2e_i, mu_u = 0 for every user, and omega + 1.
+
+        Any rejected share raises ProtocolAbort before anything changes.
+        """
+        if self.key is None:
+            raise ProtocolAbort(f"S_{self.server_id} has no key share: run the DKG first")
+        if sorted(share.sender for share in shares) != list(range(1, self.pp.N + 1)):
+            raise ProtocolAbort(f"need exactly one key update share from each of the {self.pp.N} servers")
+        ring = self._lattice.ring
+        k_i = self.key.k_i
+        for share in shares:
+            check, f_ji = self._open_share(share)
+            if f_ji is None:
+                raise ProtocolAbort(f"key update share from S_{share.sender} rejected: {check.outcome.name}")
+            k_i = (k_i + f_ji) % ring.q
+        pk_i = toprf.server_public_key(ring, self._lattice.a, k_i, self.pp.sigma)
+        self.key = ServerKey(k_i=k_i, pk_i=pk_i)
+        for record in self.users.values():
+            record.fail_count = 0
+        self.epoch += 1
+
+    def _open_share(self, share: KeyUpdateShare) -> tuple[ShareCheck, Poly | None]:
+        """Step 4 for one share: its check, and F_ji only when the check ACCEPTED it."""
+        ring = self._lattice.ring
+        link = self.peers.get(share.sender)
+
+        def check(outcome: ShareOutcome, **values: bytes) -> ShareCheck:
+            return ShareCheck(sender=share.sender, receiver=share.receiver, outcome=outcome, **values)
+
+        if (
+            link is None
+            or share.receiver != self.server_id
+            or not 0 <= share.epoch < 1 << 32
+            or len(share.commitments) != self.pp.t - 1
+        ):
+            return check(ShareOutcome.MALFORMED), None
+        signed = _signed_bytes(share.sender, share.epoch, share.commitments, share.encrypted_share)
+        if not verify(link.verification_key, signed, share.signature):
+            return check(ShareOutcome.BAD_SIGNATURE), None
+        if share.epoch != self.epoch:
+            return check(ShareOutcome.WRONG_EPOCH), None
+        plaintext = symmetric.decrypt(link.channel_key, share.encrypted_share)
+        if plaintext is None:
+            return check(ShareOutcome.DECRYPT_FAILED), None
+        try:
+            f_ji = ring.from_bytes(plaintext, (ring.n,))
+            h = [ring.from_bytes(commitment, (ring.n,)) for commitment in share.commitments]
+        except ValueError:
+            return check(ShareOutcome.MALFORMED), None
+        recomputed = ring.to_bytes(linear_hash(ring, f_ji))
+        committed = ring.to_bytes(_zero_constant_eval(ring, h, self.server_id))
+        if recomputed != committed:
+            return check(ShareOutcome.COMMITMENT_MISMATCH, recomputed=recomputed, committed=committed), None
+        return check(ShareOutcome.ACCEPTED, recomputed=recomputed, committed=committed), f_ji
 
     def _registered(self, user_id: UserID) -> UserRecord:
         """The record of a user who completed Register, else abort."""
@@ -214,3 +359,16 @@ class QPASEServer(Server):
         if record is None or record.user_pk is None:
             raise ProtocolAbort(f"{user_id!r} is not registered")
         return record
+
+
+def _zero_constant_eval(ring: Ring, coefficients: Sequence[Poly], i: int) -> Poly:
+    """sum_{k=1}^{len(coefficients)} i^k c_k mod q: a polynomial with constant term 0 evaluated at i."""
+    total = np.zeros(ring.n, dtype=np.int64)
+    for k, c in enumerate(coefficients, start=1):
+        total = (total + pow(i, k, ring.q) * c) % ring.q
+    return total
+
+
+def _signed_bytes(sender: ServerID, epoch: int, commitments: Sequence[bytes], encrypted_share: bytes) -> bytes:
+    """What sig_j covers: (j, omega, h, E(i, F_ji))."""
+    return pack(int_bytes(sender), int_bytes(epoch), *commitments, encrypted_share)

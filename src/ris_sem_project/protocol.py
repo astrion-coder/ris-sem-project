@@ -1,17 +1,20 @@
-"""Whole QPASE phases (Sec. IV-A to IV-E, Fig. 5-6), run by moving messages between parties.
+"""Whole QPASE phases (Sec. IV-A to IV-F, Fig. 5-6), run by moving messages between parties.
 
 Each function returns a record of every message it moved and what U computed from them, so a
 notebook can show a run without re-implementing a step.
 """
 
+import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from itertools import combinations_with_replacement
 
-from .parties.qpase_server import QPASEServer, RetrieveScan
+from .parties.qpase_server import PeerLink, QPASEServer, RetrieveScan, ShareCheck, ShareOutcome
 from .parties.qpase_user import OpenedItem, QPASEUser
 from .parties.types import (
     DKGShare,
     Keyword,
+    KeyUpdateShare,
     LoginProof,
     OutsourceRequest,
     ProtocolAbort,
@@ -22,6 +25,7 @@ from .parties.types import (
     TOPRFRequest,
     TOPRFResponse,
 )
+from .primitives.symmetric import KEY_SIZE
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -30,6 +34,16 @@ class DKGRun:
 
     shares: dict[ServerID, dict[ServerID, DKGShare]]
     """shares[i][j] = [s_i]_j, dealt by S_i to S_j."""
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class KeyUpdateRun:
+    """One server key update (Sec. IV-F) among all N servers."""
+
+    shares: dict[ServerID, dict[ServerID, KeyUpdateShare]]
+    """shares[j][i] = F_v^(omega) and sig_j, dealt by S_j to S_i."""
+    checks: dict[tuple[ServerID, ServerID], ShareCheck]
+    """checks[(j, i)] = step 4 at S_i for the share from S_j, before anything was applied."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -90,10 +104,35 @@ def dkg(servers: Mapping[ServerID, QPASEServer]) -> DKGRun:
 
 
 def setup_servers(pp: PublicParams, capacity: int = 1000) -> dict[ServerID, QPASEServer]:
-    """S_1, ..., S_N with M = capacity, keyed by the DKG."""
+    """S_1, ..., S_N with M = capacity, keyed by the DKG.
+
+    Every server also learns every server's ML-DSA-44 verification key, and every pair (S_j, S_i),
+    S_j = S_i included, gets a fresh channel key for E(i, .) of the key update.
+    """
     servers = {i: QPASEServer(pp, i, capacity) for i in range(1, pp.N + 1)}
+    for i, j in combinations_with_replacement(servers, 2):
+        channel_key = os.urandom(KEY_SIZE)
+        servers[i].add_peer(j, PeerLink(verification_key=servers[j].verification_key, channel_key=channel_key))
+        servers[j].add_peer(i, PeerLink(verification_key=servers[i].verification_key, channel_key=channel_key))
     dkg(servers)
     return servers
+
+
+def key_update(servers: Mapping[ServerID, QPASEServer]) -> KeyUpdateRun:
+    """Steps 1-3 at every S_j, step 4's check at every S_i, then step 5 at every S_i.
+
+    A share that fails any check raises ProtocolAbort before any server applies its update, so
+    the servers stay in one epoch under one K.
+    """
+    dealt = {j: server.key_update_shares() for j, server in servers.items()}
+    received = {i: [dealt[j][i] for j in servers] for i in servers}
+    checks = {(c.sender, c.receiver): c for i, server in servers.items() for c in server.key_update_check(received[i])}
+    rejected = {pair: c.outcome.name for pair, c in checks.items() if c.outcome is not ShareOutcome.ACCEPTED}
+    if rejected:
+        raise ProtocolAbort(f"key update shares rejected, keyed by (sender, receiver): {rejected}")
+    for i, server in servers.items():
+        server.key_update_apply(received[i])
+    return KeyUpdateRun(shares=dealt, checks=checks)
 
 
 def register(user: QPASEUser, servers: Mapping[ServerID, QPASEServer]) -> RegisterRun:
