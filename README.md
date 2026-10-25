@@ -147,3 +147,19 @@ printed value within a factor of 2 of it.
 | Residual of the real password at PARAM II | `true password residual: ~344` | notebooks/06_param_ii_offline_guessing.ipynb | 4 |
 | Smallest residual of a wrong guess at PARAM II | `smallest wrong-guess residual: ~9.2e7` | notebooks/06_param_ii_offline_guessing.ipynb | 4 |
 | Guesses matched at PARAM I | `matched guesses: []` | notebooks/06_param_ii_offline_guessing.ipynb | 5 |
+| Kernel pinned to one performance core for the cost runs | `kernel main thread affinity: [2]` | notebooks/05_costs.ipynb | 1 |
+| Median time of one PRF chain a_x, 7 runs | `one PRF chain a_x: median ~490 ms` | notebooks/05_costs.ipynb | 3 |
+| Register at the user, 7 runs | `Register at U: median ~1400 ms` | notebooks/05_costs.ipynb | 5 |
+| Login at the user, 7 runs | `Login at U: median ~1900 ms` | notebooks/05_costs.ipynb | 6 |
+| Outsource of a 100 KB document at the user, 7 runs | `at U: median ~1000 ms` | notebooks/05_costs.ipynb | 7 |
+| Retrieve at the user, 7 runs | `Retrieve at U: median ~1600 ms` | notebooks/05_costs.ipynb | 8 |
+| R2 at one server holding 10 items, 2 matching, 7 runs | `(10 items, 2 match): median ~1000 ms` | notebooks/05_costs.ipynb | 8 |
+| One key update round among 3 servers, 15 runs | `whole round, N = 3: median ~290 ms` | notebooks/05_costs.ipynb | 9 |
+| Share of Login time at the user spent in its 4 PRF chains | `Login at U: 4 PRF chains, share in chains ~97%` | notebooks/05_costs.ipynb | 10 |
+| What limits Login at a server | `Login at S_1: 0 PRF chains, share in chains 0%, limiter ML-DSA-44 verify (~80%)` | notebooks/05_costs.ipynb | 10 |
+| Register traffic per direction | `Register: U -> S 181398 B, S -> U 344064 B, S -> S 0 B` | notebooks/05_costs.ipynb | 11 |
+| Login traffic per direction | `Login: U -> S 119612 B, S -> U 235648 B, S -> S 0 B` | notebooks/05_costs.ipynb | 11 |
+| Outsource traffic for a 100 KB document | `Outsource: U -> S 106709 B, S -> U 0 B, S -> S 0 B` | notebooks/05_costs.ipynb | 11 |
+| Retrieve traffic, 2 matching 100 KB documents | `Retrieve: U -> S 12645 B, S -> U 208568 B, S -> S 0 B` | notebooks/05_costs.ipynb | 11 |
+| Key update traffic between servers, N = 3 | `Key update: U -> S 0 B, S -> U 0 B, S -> S 39264 B` | notebooks/05_costs.ipynb | 11 |
+| Failed checks over every timed run | `failures over all 270 checked runs: 0` | notebooks/05_costs.ipynb | 12 |
