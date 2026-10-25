@@ -30,9 +30,10 @@ Everything lives in `src/ris_sem_project/`. The notebooks only call these module
 - `primitives/signature.py` wraps ML-DSA-44 (CRYSTALS-Dilithium) with key generation from a seed.
 - `primitives/symmetric.py` wraps AES-256-GCM.
 - `primitives/encoding.py` is the length-prefixed encoding of signed and encrypted tuples.
+- `primitives/linear_hash.py` is the linear hash `H(x) = A_H x mod q` behind the key-update commitments (decision 6).
 - `index.py` builds the searchable index `Ct` of one document (O1) and runs the check of R2 and R3.
-- `parties/` has the abstract `User`, `Server` and adversary classes, the wire messages in `types.py`, and the concrete `QPASEUser` and `QPASEServer`.
-- `protocol.py` runs whole phases (DKG, Register, Login, Outsource, Retrieve) and returns a record of every message.
+- `parties/` has the abstract `User`, `Server` and adversary classes, the wire messages in `types.py`, and the concrete `QPASEUser` and `QPASEServer`, including the server key update steps.
+- `protocol.py` runs whole phases (DKG, Register, Login, Outsource, Retrieve, server key update) and returns a record of every message.
 - `root_attack.py` is the PARAM II offline password test shown in notebook 06.
 - `display.py` formats values for the notebooks and computes nothing.
 
@@ -41,11 +42,18 @@ The notebooks in `notebooks/` show each phase with the data that crosses the wir
 - `01_preliminaries.ipynb` covers the building blocks of Sec. II.
 - `02_register_login.ipynb` covers the DKG, Register and Login (Sec. IV-A to IV-C, Fig. 5).
 - `03_outsource_retrieve.ipynb` stores real documents on the servers and searches them (Sec. IV-D and IV-E, Fig. 6).
+- `04_server_key_update.ipynb` refreshes every server's key share and shows users are unaffected (Sec. IV-F, Lemma 3).
+- `05_costs.ipynb` measures our own computation and communication costs per phase.
 - `06_param_ii_offline_guessing.ipynb` shows why the demos do not use PARAM II.
 
 ## Server key update
 
-Sec. IV-F. This section is a placeholder until the key update lands.
+Sec. IV-F. Each epoch, every server `S_j` samples a polynomial `[F]_j` of degree `t - 1` with constant term 0,
+commits to its coefficients with `H`, and sends `S_i` the share `F_ji = [F]_j(i)`, encrypted and signed. `S_i`
+checks the signature, the epoch and `H(F_ji) = sum_k i^k h_k`, then sets `k_i' = k_i + sum_j F_ji`, recomputes
+`pk_i`, resets every `mu_u` and starts the next epoch. The shares of the master key `K` move, `K` itself does not
+(Lemma 3), so every user logs in with the same `K_u` and retrieves the same documents. `protocol.key_update` checks
+every share on every server before any server applies its update, so the servers never end up in different epochs.
 
 ## Run the tests
 
@@ -81,7 +89,10 @@ To check every row of [Numeric claims](#numeric-claims) against the saved notebo
 - The TOPRF combines with the sign that the algebra of Theorem 1's proof gives, accepts only server subsets with integer Lagrange coefficients, and draws the DKG contributions, `r` and `e` from `chi_sigma` (decision 3).
 - The extractor hint `sigma = S(F)` is computed at Register, stored by every server and returned at Login, so the same password gives the same `K_u` (decision 4). Fig. 2 computes the hint from a different value.
 - DKG sharing polynomials have degree `t - 1`, so any `t` servers can run Login (decision 5).
-- Key-update commitments use a linear hash `H(x) = A_H x mod q`, because the check in Sec. IV-F needs a homomorphic `H` (decision 6).
+- Key-update commitments use a linear hash `H(x) = A_H x mod q`, because the check in Sec. IV-F needs a homomorphic `H` (decision 6). Each server adds the shares it receives without the printed `lambda_{i,j}`, which keeps `K` unchanged.
+- That `H` hides nothing. `A_H` is square and invertible mod `q`, so the broadcast commitments `h_k = H(alpha_k)` reveal `alpha_k`, every share `F_ji` and every key delta to an eavesdropper. The shares still verify and `K` still holds, but the update no longer protects a key share that leaked in an earlier epoch. A fix needs a hiding commitment with randomness, which the paper does not specify.
+- The paper assumes secure server-to-server channels. `E(i, .)` stands in for them with AES-256-GCM under a key per server pair, set up by `protocol.setup_servers`. Each server signs its update shares with its own ML-DSA-44 key.
+- As printed, Login step L1 adds 1 to `mu_u` on every attempt, successful or not, and only the key update resets it. A user therefore gets `mu` logins per epoch in total, not `mu` failed ones.
 - Values the paper leaves open are fixed as `p = 2`, `sigma = 3.2` and `L = 128`, with AES-256-GCM and ML-DSA-44 (decision 7).
 - `sigma` is the standard deviation of `chi_sigma`, as the text of Definition 3 says. Its printed density would make it the width parameter.
 - HKDF and the PRF use the BP lattice PRF in place of HMAC. The Dilithium seed is the start of `HKDF(K_u, "QPASE/sig")`.
@@ -127,3 +138,12 @@ printed value within a factor of 2 of it.
 | Retrieve request to each server (user id, dsk, sig_dsk) | `RetrieveRequest, 4217 B` | notebooks/03_outsource_retrieve.ipynb | 9 |
 | Time of R2 on all 3 servers, 7 stored items, 3 matches | `~1.4 s` | notebooks/03_outsource_retrieve.ipynb | 10 |
 | Items recovered for the keyword medical | `recovered items [1, 3, 6]` | notebooks/03_outsource_retrieve.ipynb | 12 |
+| Key update shares that pass step 4, N = 3 | `shares accepted: 9 of 9` | notebooks/04_server_key_update.ipynb | 6 |
+| Payload of one key update share at t = 2 (h, E(i, F_ji), sig_j) | `6544 B` | notebooks/04_server_key_update.ipynb | 5 |
+| Size of a key share k_i | `(2048 B)` | notebooks/04_server_key_update.ipynb | 4 |
+| Epochs after two key updates | `epochs: [2, 2, 2]` | notebooks/04_server_key_update.ipynb | 11 |
+| PARAM II ring degree is odd | `n = 595 (odd: True)` | notebooks/06_param_ii_offline_guessing.ipynb | 1 |
+| Match threshold of the offline test at PARAM II | `match threshold tau = 1249` | notebooks/06_param_ii_offline_guessing.ipynb | 2 |
+| Residual of the real password at PARAM II | `true password residual: ~344` | notebooks/06_param_ii_offline_guessing.ipynb | 4 |
+| Smallest residual of a wrong guess at PARAM II | `smallest wrong-guess residual: ~9.2e7` | notebooks/06_param_ii_offline_guessing.ipynb | 4 |
+| Guesses matched at PARAM I | `matched guesses: []` | notebooks/06_param_ii_offline_guessing.ipynb | 5 |

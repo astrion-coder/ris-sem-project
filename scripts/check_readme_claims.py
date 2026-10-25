@@ -58,7 +58,7 @@ def approx_found(value: str, output: str) -> bool:
     match = re.fullmatch(rf"(.*?)~\s*({NUMBER})\s*(\S.*)?", value)
     if match is None:
         raise ValueError(f"malformed approximate value {value!r}")
-    label = re.escape(match.group(1))
+    label = re.escape(match.group(1).rstrip()) + r"\s*" if match.group(1).strip() else ""
     stated = float(match.group(2).replace(",", ""))
     unit = re.escape(match.group(3) or "")
     for found in re.finditer(rf"{label}({NUMBER})\s*{unit}(?![A-Za-z])", output):
