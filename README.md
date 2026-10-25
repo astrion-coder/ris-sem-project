@@ -80,6 +80,27 @@ To check every row of [Numeric claims](#numeric-claims) against the saved notebo
 .venv/bin/python scripts/check_readme_claims.py
 ```
 
+## Known security gaps
+
+Two gaps came out of building and testing the scheme. Both are documented here, and neither is fixed, because a
+fix needs a design the paper does not give.
+
+- **PARAM II in this ring allows offline password guessing.** Table II gives PARAM II the degree `n = 595`. This
+  code runs it in the scheme text's ring `Z_q[X]/(X^n + 1)` (decision 1). Since 595 is odd, `X = -1` is a root
+  of `X^595 + 1`, and evaluating at `-1` maps each ring-LWE sample to a one-dimensional one. A single server can
+  then test password guesses offline against one blinded TOPRF request.
+  `notebooks/06_param_ii_offline_guessing.ipynb` shows it. The paper's security estimate for `n = 595` likely
+  assumes plain LWE, where this attack does not apply, so the flaw belongs to this reading of the parameters and is
+  not proven of the paper. Every other notebook runs on PARAM I (`n = 512`), where `X^512 + 1` has no root mod `q` and the
+  attack finds nothing (notebook 06, PARAM I control).
+- **The key-update commitments hide nothing.** Sec. IV-F checks `H(F_ji) = sum_k i^k H(alpha_k)`, so `H` must be
+  linear. This code uses `H(x) = A_H x mod q` with a square `A_H`, which is invertible mod `q`, so the broadcast
+  `h_k = H(alpha_k)` reveal `alpha_k`, every share `F_ji` and every key delta to an eavesdropper. Every linear `H`
+  on uniform inputs has this problem. If it is injective it can be inverted, and if it compresses, a dealer can
+  compute a kernel vector and change a share without changing `H`. The shares still verify and `K` still holds, but
+  the update no longer protects a key share that leaked in an earlier epoch. A fix needs a hiding commitment with
+  randomness, which the paper does not specify.
+
 ## Where this differs from the paper
 
 `docs/implementation-plan.md` Part 2 explains each item.
@@ -90,14 +111,12 @@ To check every row of [Numeric claims](#numeric-claims) against the saved notebo
 - The extractor hint `sigma = S(F)` is computed at Register, stored by every server and returned at Login, so the same password gives the same `K_u` (decision 4). Fig. 2 computes the hint from a different value.
 - DKG sharing polynomials have degree `t - 1`, so any `t` servers can run Login (decision 5).
 - Key-update commitments use a linear hash `H(x) = A_H x mod q`, because the check in Sec. IV-F needs a homomorphic `H` (decision 6). Each server adds the shares it receives without the printed `lambda_{i,j}`, which keeps `K` unchanged.
-- That `H` hides nothing. `A_H` is square and invertible mod `q`, so the broadcast commitments `h_k = H(alpha_k)` reveal `alpha_k`, every share `F_ji` and every key delta to an eavesdropper. The shares still verify and `K` still holds, but the update no longer protects a key share that leaked in an earlier epoch. A fix needs a hiding commitment with randomness, which the paper does not specify.
 - The paper assumes secure server-to-server channels. `E(i, .)` stands in for them with AES-256-GCM under a key per server pair, set up by `protocol.setup_servers`. Each server signs its update shares with its own ML-DSA-44 key.
 - As printed, Login step L1 adds 1 to `mu_u` on every attempt, successful or not, and only the key update resets it. A user therefore gets `mu` logins per epoch in total, not `mu` failed ones.
 - Values the paper leaves open are fixed as `p = 2`, `sigma = 3.2` and `L = 128`, with AES-256-GCM and ML-DSA-44 (decision 7).
 - `sigma` is the standard deviation of `chi_sigma`, as the text of Definition 3 says. Its printed density would make it the width parameter.
 - HKDF and the PRF use the BP lattice PRF in place of HMAC. The Dilithium seed is the start of `HKDF(K_u, "QPASE/sig")`.
 - Outsource and Retrieve are authorized by `sig_Ct` and `sig_dsk` under `pk_u`, not by a passed L3. Retrieve reaches all `N` servers and Login only `t`, so an L3 gate would lock the other servers out of R2.
-- PARAM II (`n = 595`) has odd ring degree, so `X = -1` is a root of `X^n + 1`. A single server can then test password guesses offline against one blinded TOPRF request. Notebooks 01 to 03 therefore run on PARAM I (`n = 512`). `notebooks/06_param_ii_offline_guessing.ipynb` shows the attack.
 - The Gaussian sampler and the extractor are not constant-time. This is demonstration code.
 - Multi-keyword search (Sec. IV-G) is an extension the paper sketches outside Figs. 5-6. This implementation leaves it out, and queries take one keyword.
 
@@ -119,7 +138,7 @@ printed value within a factor of 2 of it.
 | Size of each public a, a_0, a_1 | `57344 B` | notebooks/01_preliminaries.ipynb | 2 |
 | Random R_q products equal to an exact integer reference | `3/3` | notebooks/01_preliminaries.ipynb | 3 |
 | Output bits of one BP PRF evaluation | `14336 bits` | notebooks/01_preliminaries.ipynb | 5 |
-| Median time of one BP PRF evaluation, 7 runs | `~0.6 s` | notebooks/01_preliminaries.ipynb | 6 |
+| Median time of one BP PRF evaluation, 7 runs | `over 7 runs: median ~0.6 s` | notebooks/01_preliminaries.ipynb | 6 |
 | Largest TOPRF noise coefficient 2e'' in one run | `max \|2e''\| = ~5000` | notebooks/01_preliminaries.ipynb | 10 |
 | q/4, the extractor's noise bound | `q/4 = 67108849` | notebooks/01_preliminaries.ipynb | 10 |
 | Size of K_u and of an HKDF output | `1792 B` | notebooks/01_preliminaries.ipynb | 11 |
@@ -131,12 +150,12 @@ printed value within a factor of 2 of it.
 | Login L1 response from each server | `L1 response per server: 117792 B` | notebooks/02_register_login.ipynb | 6 |
 | Login L2 proof to each server | `L2 proof per server: 2457 B` | notebooks/02_register_login.ipynb | 6 |
 | Repeated correct logins with byte-identical K_u | `10/10 logins gave byte-identical K_u` | notebooks/02_register_login.ipynb | 10 |
-| Median time of one Login with 2 servers, 10 runs | `~2.3 s` | notebooks/02_register_login.ipynb | 10 |
+| Median time of one Login with 2 servers, 10 runs | `over 10 runs: median ~2.3 s` | notebooks/02_register_login.ipynb | 10 |
 | Attempt count at which S_2 refuses L1 | `mu_u = 14 reached the limit mu = 14` | notebooks/02_register_login.ipynb | 11 |
 | Size of the index ciphertext Ct | `Ct 4256 B` | notebooks/03_outsource_retrieve.ipynb | 4 |
 | Size of sig_Ct (ML-DSA-44 signature) | `sig_Ct 2420 B` | notebooks/03_outsource_retrieve.ipynb | 4 |
 | Retrieve request to each server (user id, dsk, sig_dsk) | `RetrieveRequest, 4217 B` | notebooks/03_outsource_retrieve.ipynb | 9 |
-| Time of R2 on all 3 servers, 7 stored items, 3 matches | `~1.4 s` | notebooks/03_outsource_retrieve.ipynb | 10 |
+| Time of R2 on all 3 servers, 7 stored items, 3 matches | `R2 on all 3 servers: ~1.4 s` | notebooks/03_outsource_retrieve.ipynb | 10 |
 | Items recovered for the keyword medical | `recovered items [1, 3, 6]` | notebooks/03_outsource_retrieve.ipynb | 12 |
 | Key update shares that pass step 4, N = 3 | `shares accepted: 9 of 9` | notebooks/04_server_key_update.ipynb | 6 |
 | Payload of one key update share at t = 2 (h, E(i, F_ji), sig_j) | `6544 B` | notebooks/04_server_key_update.ipynb | 5 |
