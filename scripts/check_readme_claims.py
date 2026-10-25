@@ -4,10 +4,15 @@ Usage: .venv/bin/python scripts/check_readme_claims.py
 
 Table shape:  | Claim | Value | Notebook | Cell |
 Cell k is the k-th code cell, i.e. execution count [k] after a fresh Run All.
-A row passes when the Value text (backticks stripped) appears verbatim in that
-cell's saved output. Run scripts/run_notebooks.py first so outputs are current.
+
+An exact Value (backticks stripped) must appear verbatim in that cell's saved output.
+A Value written `~<number> <unit>` is a measurement that changes between runs (a timing,
+an observed noise maximum): it passes when the output contains a number followed by the
+same unit that is within a factor of 2 of the stated number.
+Run scripts/run_notebooks.py first so outputs are current.
 """
 
+import re
 import sys
 from pathlib import Path
 
@@ -15,6 +20,8 @@ import nbformat
 
 ROOT = Path(__file__).resolve().parent.parent
 HEADING = "## Numeric claims"
+NUMBER = r"[-+]?\d[\d,]*(?:\.\d+)?(?:[eE][-+]?\d+)?"
+TOLERANCE = 2.0
 
 
 def claim_rows(readme: str) -> list[list[str]]:
@@ -46,13 +53,26 @@ def cell_output(notebook: Path, k: int) -> str:
     return "".join(parts)
 
 
+def approx_found(value: str, output: str) -> bool:
+    match = re.fullmatch(rf"~\s*({NUMBER})\s*(\S.*)?", value)
+    if match is None:
+        raise ValueError(f"malformed approximate value {value!r}")
+    stated = float(match.group(1).replace(",", ""))
+    unit = re.escape(match.group(2) or "")
+    for found in re.finditer(rf"({NUMBER})\s*{unit}(?![A-Za-z])", output):
+        measured = float(found.group(1).replace(",", ""))
+        if stated == measured == 0 or (stated * measured > 0 and max(stated, measured) / min(stated, measured) <= TOLERANCE):
+            return True
+    return False
+
+
 def main() -> int:
     rows = claim_rows((ROOT / "README.md").read_text())
     failures = 0
     for claim, value, notebook, cell in rows:
         value = value.strip("`")
         output = cell_output(ROOT / notebook, int(cell))
-        ok = value in output
+        ok = approx_found(value, output) if value.startswith("~") else value in output
         failures += not ok
         print(f"{'ok  ' if ok else 'FAIL'} {notebook} [{cell}] {value!r}  {claim}")
     print(f"{len(rows) - failures}/{len(rows)} claims found in their cells")

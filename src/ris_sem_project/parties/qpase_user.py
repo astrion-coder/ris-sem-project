@@ -224,5 +224,5 @@ def _signing_keys(hkdf: Hkdf) -> tuple[bytes, bytes]:
 
 def _single(keywords: Sequence[Keyword]) -> Keyword:
     if len(keywords) != 1:
-        raise ValueError(f"single-keyword queries only (Sec. IV-G is not built yet), got {len(keywords)} keywords")
+        raise ValueError(f"single-keyword queries only (Sec. IV-G is not implemented), got {len(keywords)} keywords")
     return keywords[0]
