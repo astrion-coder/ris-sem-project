@@ -5,6 +5,12 @@ satisfy. H(x) = A_H x mod q is linear, so H(sum_k i^k alpha_k) = sum_k i^k H(alp
 exactly. x in R_q is read as its n coefficients and A_H in Z_q^{n x n} is public: it is expanded
 from SHAKE256(b"QPASE/H") as 4-byte little-endian words masked to ell bits, keeping those below q,
 filled row-major. Every party therefore derives the same matrix from (q, n) alone.
+
+Known gap: A_H is square and, being random mod the prime q, invertible, so h_k = H(alpha_k)
+reveals alpha_k to anyone who sees the broadcast commitments. An eavesdropper then knows every
+F_ji and every key delta k_i' - k_i, and E(i, .) hides nothing. Verification, binding and Lemma 3
+still hold. A compressing A_H would hide alpha_k but lose binding for uniform inputs; a hiding,
+binding, homomorphic lattice commitment needs randomness the paper's H does not have.
 """
 
 import hashlib
