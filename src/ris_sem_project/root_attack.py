@@ -1,9 +1,11 @@
-"""Offline password test against PARAM II through the root X = -1 of X^n + 1 (finding on Fig. 2 and Fig. 3, attack 1).
+"""Offline password test against PARAM II run in Z_q[X]/(X^595 + 1), through the root X = -1.
 
-The paper claims a semi-honest server that sees the blinded request b = a r + a_x + 2e learns
-nothing that lets it test password guesses offline. That rests on b being ring-LWE samples
-in R_q. PARAM II takes n = 595, which is odd, so (-1)^595 + 1 = 0 and X = -1 is a root of
-X^595 + 1. Then phi(a) = a(-1) = sum_i (-1)^i a_i mod q is a ring homomorphism R_q -> Z_q, and
+Fig. 3's attack 1 (offline guessing) should fail against a semi-honest server that sees the
+blinded request b = a r + a_x + 2e, because b is a ring-LWE sample in R_q. This implementation
+runs PARAM II in R_q = Z_q[X]/(X^n + 1), the ring of the scheme text, with Table II's n = 595
+(plan decision 1). The paper's security estimate for n = 595 likely assumes plain LWE, where this
+attack does not apply, so the flaw belongs to that reading of the parameters and is not proven
+of the paper. 595 is odd, so (-1)^595 + 1 = 0 and X = -1 is a root of X^595 + 1. Then phi(a) = a(-1) = sum_i (-1)^i a_i mod q is a ring homomorphism R_q -> Z_q, and
 for a guess x' with a_x' its encoding,
 
     phi(b_j) - phi(a_x',j) = phi(a_j) phi(r) + 2 phi(e_j) + phi(a_x,j - a_x',j).

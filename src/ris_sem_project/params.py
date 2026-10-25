@@ -33,11 +33,12 @@ PARAM_I = ParamSet(name="PARAM I", q=2**28 - 57, n=512, p=2, sigma=3.2, L=128)
 PARAM_II = ParamSet(name="PARAM II", q=2**28 - 57, n=595, p=2, sigma=3.2, L=128)
 """140-bit classical and 128-bit quantum security (BKZ block size 478), used in the paper's experiments.
 
-595 is not a power of two, so X^595 + 1 is not a cyclotomic polynomial. The ring is
-still Z_q[X]/(X^595 + 1) as the paper prints it (plan decision 1). Because 595 is odd,
-X = -1 is a root, so a -> a(-1) maps R_q onto Z_q and shrinks each ring-LWE sample to a
-one-dimensional one. A server can then test password guesses offline against one
-blinded TOPRF request. Use PARAM I where security matters.
+595 is not a power of two, so X^595 + 1 is not a cyclotomic polynomial. This code still
+uses Z_q[X]/(X^595 + 1), the ring of the scheme text (plan decision 1); the paper's estimate
+for n = 595 likely assumes plain LWE. In this ring, because 595 is odd, X = -1 is a root, so
+a -> a(-1) maps R_q onto Z_q and shrinks each ring-LWE sample to a one-dimensional one. A
+server can then test password guesses offline against one blinded TOPRF request
+(root_attack.py, notebook 06). Use PARAM I where security matters.
 """
 
 
