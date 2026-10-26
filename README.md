@@ -55,6 +55,17 @@ checks the signature, the epoch and `H(F_ji) = sum_k i^k h_k`, then sets `k_i' =
 (Lemma 3), so every user logs in with the same `K_u` and retrieves the same documents. `protocol.key_update` checks
 every share on every server before any server applies its update, so the servers never end up in different epochs.
 
+## Set up
+
+`.venv/` is not in git. To create it, install [uv](https://docs.astral.sh/uv/) and run this in the repository root:
+
+```sh
+uv sync
+```
+
+`uv sync` builds `.venv/` with Python 3.14 and the packages pinned in `uv.lock`, including the dev packages that
+the notebook runner needs. Every command below uses that environment through `.venv/bin/python`.
+
 ## Run the tests
 
 From the repository root:
@@ -168,6 +179,7 @@ printed value within a factor of 2 of it.
 | Guesses matched at PARAM I | `matched guesses: []` | notebooks/06_param_ii_offline_guessing.ipynb | 5 |
 | Kernel pinned to one performance core for the cost runs | `kernel main thread affinity: [2]` | notebooks/05_costs.ipynb | 1 |
 | Median time of one PRF chain a_x, 7 runs | `one PRF chain a_x: median ~490 ms` | notebooks/05_costs.ipynb | 3 |
+| Median time of one ML-DSA-44 signature, 101 runs | `ML-DSA-44 sign: median ~20 ms` | notebooks/05_costs.ipynb | 4 |
 | Register at the user, 7 runs | `Register at U: median ~1400 ms` | notebooks/05_costs.ipynb | 5 |
 | Login at the user, 7 runs | `Login at U: median ~1900 ms` | notebooks/05_costs.ipynb | 6 |
 | Outsource of a 100 KB document at the user, 7 runs | `at U: median ~1000 ms` | notebooks/05_costs.ipynb | 7 |
